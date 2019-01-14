@@ -9,7 +9,7 @@ strip.begin()
 p = player.Player(strip, 60)
 p.set_mode(p.MODE_ANIMATION)
 
-p.add_anim('anim:test:0001;area:1001;ticks:25;color:gradient:random:random;movement:move:linear:-:300',
+p.add_anim('anim:test:0001;area:1001;ticks:600;color:gradient:random:random;movement:move:linear:-:300',
            'default',
            'delay:0')
 
