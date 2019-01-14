@@ -290,9 +290,10 @@ class AnimationManager(Thread):
 
     def run(self):
         while True:
+            start = time.time()
+
             if self.enabled:
                 with self.lock:
-                    start = time.time()
 
                     num_ready = 0
 
@@ -371,11 +372,9 @@ class AnimationManager(Thread):
                             self.strip.setPixelColor(index, res)
                         self.strip.show()
 
-                end = time.time()
-
-                if (1 / self.render_rate) > (end - start):
-                    print('sleeping for', ((1 / self.render_rate) - (end - start)) / (1 / self.render_rate) * 100, '% of frame')
-                    time.sleep((1 / self.render_rate) - (end - start))
+            end = time.time()
+            if (1 / self.render_rate) > (end - start):
+                time.sleep((1 / self.render_rate) - (end - start))
 
 
 class AreaManager(Thread):
@@ -460,10 +459,10 @@ class AreaManager(Thread):
 
     def run(self):
         while True:
+            start = time.time()
+
             if self.enabled:
                 with self.lock:
-                    start = time.time()
-
                     if self.run_update:
                         # update each area
                         for area_id in list(self.state):
@@ -512,12 +511,9 @@ class AreaManager(Thread):
                         self.strip.show()
                         self.run_update = False
 
-                    end = time.time()
-
-                if (1 / self.render_rate) > (end - start):
-                    time.sleep((1 / self.render_rate) - (end - start))
-                else:
-                    print('went over time!!!')
+            end = time.time()
+            if (1 / self.render_rate) > (end - start):
+                time.sleep((1 / self.render_rate) - (end - start))
 
 
 class Player:
