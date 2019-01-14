@@ -164,9 +164,9 @@ class ClientThread(Thread):
 
 
 # get start parameters
-port = input('> Port: ')
-gpio = input('> GPIO: ')
-num = input('> #LED: ')
+port = 9989
+gpio = 21
+num = 300
 
 strip = neopixel.Adafruit_NeoPixel(int(num), int(gpio), strip_type=neopixel.ws.WS2811_STRIP_GRB)
 strip.begin()
