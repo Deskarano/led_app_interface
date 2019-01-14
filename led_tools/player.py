@@ -374,6 +374,7 @@ class AnimationManager(Thread):
                 end = time.time()
 
                 if (1 / self.render_rate) > (end - start):
+                    print('sleeping for', ((1 / self.render_rate) - (end - start)) / (1 / self.render_rate) * 100, '% of frame')
                     time.sleep((1 / self.render_rate) - (end - start))
 
 
