@@ -9,8 +9,9 @@ strip.begin()
 p = player.Player(strip, 60)
 p.set_mode(p.MODE_ANIMATION)
 
-p.add_anim('anim:test:0001;area:1001;ticks:600;color:gradient:random:random;movement:move:linear:-:300',
-           'default',
-           'delay:0')
+p.add_anim('anim:gentle alarm:vUmshFyguQTSfLiO;area:DP9uNl4yxTQ6ZQRE;ticks:1311;color:gradient:0x11AC6F:0xE8C55E;movement:move:Linear:-:200',
+           'event:blah;conf0:now',
+           'event:meh;conf0:never',
+           'event:meh;conf0:never')
 
 code.interact(local=locals())

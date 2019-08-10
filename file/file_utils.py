@@ -1,7 +1,7 @@
 import os
 
-QUEUE_PATH = 'test/queue/'
-AREA_PATH = 'test/areas/'
+QUEUE_PATH = '/home/pi/led_app/led_app_interface/app_files/queue/'
+AREA_PATH = '/home/pi/led_app/led_app_interface/app_files/areas/'
 
 
 def get_queue():

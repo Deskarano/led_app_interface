@@ -32,6 +32,15 @@ AREA_END_VAL = 2
 AREA_COLOR = 'color'
 AREA_COLOR_VAL = 1
 
+# config settings for events
+EVENT_ENTRY = 'event'
+
+EVENT_CONF = 'conf'
+EVENT_TYPE = 1
+EVENT_ARG1 = 2
+EVENT_ARG2 = 3
+EVENT_ARG3 = 4
+
 
 def split(config):
     result = []

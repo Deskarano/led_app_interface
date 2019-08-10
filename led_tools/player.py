@@ -1,13 +1,11 @@
 import time
-import datetime
 import queue
 
 from collections import defaultdict
 from threading import Thread, Condition
+from datetime import date as dt_date, time as dt_time, datetime, timedelta
 
-from led_tools.animation import animation, colors, movements
-from led_tools.animation.control import triggers, repeats
-
+from led_tools.animation import animation, colors, movements, events
 from file import config_utils, file_utils
 
 from . import color_tools
@@ -66,8 +64,9 @@ class AnimationManager(Thread):
         self.run_states = {}
         self.vis_states = {}
 
-        self.triggers = {}
-        self.repeats = {}
+        self.play_events = {}
+        self.pause_events = {}
+        self.end_events = {}
 
         self.paused_renders = {}
 
@@ -77,27 +76,18 @@ class AnimationManager(Thread):
 
     @staticmethod
     def _parse_movement(config):
-        move_type = config_utils.get_param_idx(config,
-                                               config_utils.QUEUE_MOVE,
-                                               config_utils.QUEUE_MOVE_TYPE)
+        move_type = config_utils.get_param_idx(config, config_utils.QUEUE_MOVE, config_utils.QUEUE_MOVE_TYPE)
+        move_fade_type = config_utils.get_param_idx(config, config_utils.QUEUE_MOVE, config_utils.QUEUE_MOVE_FADE_TYPE)
+        move_dir = config_utils.get_param_idx(config, config_utils.QUEUE_MOVE, config_utils.QUEUE_MOVE_DIR)
 
-        move_fade_type = config_utils.get_param_idx(config,
-                                                    config_utils.QUEUE_MOVE,
-                                                    config_utils.QUEUE_MOVE_FADE_TYPE)
-
-        move_dir = config_utils.get_param_idx(config,
-                                              config_utils.QUEUE_MOVE,
-                                              config_utils.QUEUE_MOVE_DIR)
+        print('[ANIM_ADD]: parsed movement and extracted type', move_type)
 
         if move_type == 'fade':
             return movements.Fade(move_fade_type, move_dir)
 
         elif move_type == 'move':
-            move_length = config_utils.get_param_idx(config,
-                                                     config_utils.QUEUE_MOVE,
-                                                     config_utils.QUEUE_MOVE_ARG1)
+            move_length = config_utils.get_param_idx(config, config_utils.QUEUE_MOVE, config_utils.QUEUE_MOVE_ARG1)
 
-            # TODO: implement acceleration here once done
             return movements.Move(int(move_length), move_fade_type, move_dir, '')
 
         elif move_type == 'flicker':
@@ -108,14 +98,12 @@ class AnimationManager(Thread):
 
     @staticmethod
     def _parse_color(config):
-        color_type = config_utils.get_param_idx(config,
-                                                config_utils.QUEUE_COLOR,
-                                                config_utils.QUEUE_COLOR_TYPE)
+        color_type = config_utils.get_param_idx(config, config_utils.QUEUE_COLOR, config_utils.QUEUE_COLOR_TYPE)
+
+        print('[ANIM_ADD]: parsed color and extracted type', color_type)
 
         if color_type == 'solid':
-            color_solid = config_utils.get_param_idx(config,
-                                                     config_utils.QUEUE_COLOR,
-                                                     config_utils.QUEUE_COLOR_ARG1)
+            color_solid = config_utils.get_param_idx(config, config_utils.QUEUE_COLOR, config_utils.QUEUE_COLOR_ARG1)
 
             if color_solid == 'random':
                 return colors.Solid(color_tools.random_color(0xFF, 0xFF, 0xFF))
@@ -123,12 +111,9 @@ class AnimationManager(Thread):
                 return colors.Solid(int(color_solid, 16))
 
         elif color_type == 'gradient':
-            color_gradient1 = config_utils.get_param_idx(config,
-                                                         config_utils.QUEUE_COLOR,
+            color_gradient1 = config_utils.get_param_idx(config, config_utils.QUEUE_COLOR,
                                                          config_utils.QUEUE_COLOR_ARG1)
-
-            color_gradient2 = config_utils.get_param_idx(config,
-                                                         config_utils.QUEUE_COLOR,
+            color_gradient2 = config_utils.get_param_idx(config, config_utils.QUEUE_COLOR,
                                                          config_utils.QUEUE_COLOR_ARG2)
 
             if color_gradient1 == 'random':
@@ -151,86 +136,99 @@ class AnimationManager(Thread):
 
     @staticmethod
     def _parse_animation(config):
-        anim_id = config_utils.get_param_idx(config,
-                                             config_utils.QUEUE_ANIM,
-                                             config_utils.QUEU_ANIM_ID_VAL)
+        anim_id = config_utils.get_param_idx(config, config_utils.QUEUE_ANIM, config_utils.QUEU_ANIM_ID_VAL)
 
-        area_id = config_utils.get_param_idx(config,
-                                             config_utils.QUEUE_AREA,
-                                             config_utils.QUEUE_AREA_ID)
-
+        area_id = config_utils.get_param_idx(config, config_utils.QUEUE_AREA, config_utils.QUEUE_AREA_ID)
         area_config = file_utils.get_file_config(file_utils.AREA_PATH, area_id)
 
-        anim_block_start = config_utils.get_param_idx(area_config,
-                                                      config_utils.AREA_BLOCK,
-                                                      config_utils.AREA_START_VAL)
+        anim_block_start = config_utils.get_param_idx(area_config, config_utils.AREA_BLOCK, config_utils.AREA_START_VAL)
+        anim_block_end = config_utils.get_param_idx(area_config, config_utils.AREA_BLOCK, config_utils.AREA_END_VAL)
+        anim_ticks = config_utils.get_param_idx(config, config_utils.QUEUE_TICKS, config_utils.QUEUE_TICKS_VAL)
 
-        anim_block_end = config_utils.get_param_idx(area_config,
-                                                    config_utils.AREA_BLOCK,
-                                                    config_utils.AREA_END_VAL)
-
-        anim_ticks = config_utils.get_param_idx(config,
-                                                config_utils.QUEUE_TICKS,
-                                                config_utils.QUEUE_TICKS_VAL)
-
+        print('[ANIM_ADD]: finished parsing animation', anim_id, 'and creating object')
         return animation.Animation(anim_id, int(anim_block_start), int(anim_block_end), int(anim_ticks))
 
     @staticmethod
-    def _parse_triggers(config):
-        trigger_configs = config_utils.split(config)
-        trigger_results = []
+    def _parse_event(config):
+        event_configs = config_utils.split(config)
+        event_results = []
 
-        for t in trigger_configs:
-            if t[0] == 'default':
-                trigger_results.append(triggers.DefaultTrigger())
+        print('[ANIM_ADD]: parsing event config', config)
 
-            elif t[0] == 'time':
-                trigger_time = datetime.time(hour=int(t[1]), minute=int(t[2]), second=int(t[3]))
-                trigger_date = datetime.datetime.today()
+        for e in event_configs[1:]:
+            print('[ANIM_ADD]: extracting event of type', e[1])
 
-                trigger_datetime = datetime.datetime.combine(trigger_date, trigger_time)
+            if e[1] == 'now':
+                event_results.append(events.NowEvent())
 
-                if trigger_datetime.timestamp() < time.time():
-                    print('already past time, forwarding to tomorrow')
-                    trigger_delta = datetime.timedelta(days=1)
-                    trigger_datetime = trigger_datetime + trigger_delta
+            elif e[1] == 'never':
+                event_results.append(events.NeverEvent())
 
-                trigger_results.append(triggers.TimeTrigger(trigger_datetime.timestamp()))
+            elif e[1] == 'time':
+                event_date = datetime.today()
+                event_time = dt_time(hour=int(e[2]), minute=int(e[3]), second=int(e[4]))
 
-            elif t[0] == 'delay':
-                trigger_results.append(triggers.DelayTrigger(float(t[1])))
+                event_datetime = datetime.combine(event_date, event_time)
+                if event_datetime.timestamp() < time.time():
+                    event_delta = timedelta(days=1)
+                    event_datetime += event_delta
 
-        if len(trigger_results) == 0:
+                event_results.append(events.TimeEvent(event_datetime))
+
+            elif e[1] == 'date':
+                event_date = dt_date(year=datetime.today().year, month=int(e[2]), day=int(e[3]))
+                event_time = dt_time(hour=0, minute=0, second=0)
+
+                event_datetime = datetime.combine(event_date, event_time)
+                if event_datetime.timestamp() < time.time():
+                    event_delta = timedelta(days=365)
+                    event_datetime += event_delta
+
+                event_results.append(events.DateEvent(event_datetime))
+
+            elif e[1] == 'delay':
+                event_results.append(events.DelayEvent(int(e[2]), int(e[3]), int(e[4])))
+
+            elif e[1] == 'boolean':
+                if e[3] == 'AND':
+                    event_results.append(events.BooleanEvent(int(e[2]), events.BooleanEvent.AND))
+
+                elif e[3] == 'OR':
+                    event_results.append(events.BooleanEvent(int(e[2]), events.BooleanEvent.OR))
+
+            elif e[1] == 'chain':
+                event_results.append(events.ChainEvent(int(e[2])))
+
+        if len(event_results) == 0:
             return None
-        elif len(trigger_results) == 1:
-            return trigger_results[0]
+
+        elif len(event_results) == 1:
+            return event_results[0]
+
         else:
-            return triggers.ChainTrigger(trigger_results)
+            print('[ANIM_ADD]: rebuilding event hierarchy')
+            result = event_results[0]
+            current = result
+            idx = 1
 
-    @staticmethod
-    def _parse_repeats(config):
-        repeat_configs = config_utils.split(config)
-        repeat_results = []
+            while idx < len(event_results):
+                if isinstance(event_results[idx], events.CombinedEvent):
+                    last = current
+                    current = event_results[idx]
 
-        for r in repeat_configs:
-            if r[0] == 'count':
-                repeat_results.append(repeats.CountRepeat(int(r[1])))
+                    for i in range(current.count):
+                        current.add_child(event_results[idx + i])
 
-            elif r[0] == 'time':
-                repeat_time = datetime.time(hour=int(r[1]), minute=int(r[2]), second=int(r[3]))
-                repeat_results.append(repeats.TimeRepeat(repeat_time))
+                    idx += current.count
+                    current = last
+                else:
+                    current.add_child(event_results[idx])
+                    idx += 1
 
-            elif r[0] == 'delay':
-                repeat_results.append(repeats.DelayRepeat(float(r[1])))
+            return result
 
-        if len(repeat_results) == 0:
-            return None
-        elif len(repeat_results) == 1:
-            return repeat_results[0]
-        else:
-            return repeats.ChainRepeat(repeat_results)
-
-    def add(self, animation_config, trigger_config, repeat_config):
+    def add(self, animation_config, play_config, pause_config, end_config):
+        print('[ANIM_ADD]: adding a new animation', animation_config)
         mov = self._parse_movement(animation_config)
         col = self._parse_color(animation_config)
         anim = self._parse_animation(animation_config)
@@ -238,10 +236,13 @@ class AnimationManager(Thread):
         anim.set_movement(mov)
         anim.set_color(col)
 
-        trigger = self._parse_triggers(trigger_config)
-        repeat = self._parse_repeats(repeat_config)
+        play_event = self._parse_event(play_config)
+        pause_event = self._parse_event(pause_config)
+        end_event = self._parse_event(end_config)
 
         with self.lock:
+            print('[ANIM_ADD]: holding lock, adding animation to player')
+
             self.configs[anim.anim_id] = animation_config
             self.animations[anim.anim_id] = AnimationThread(anim)
             self.animations[anim.anim_id].start()
@@ -249,12 +250,13 @@ class AnimationManager(Thread):
             self.run_states[anim.anim_id] = self.STATE_WAITING
             self.vis_states[anim.anim_id] = self.STATE_VISIBLE
 
-            # todo
-            self.triggers[anim.anim_id] = trigger
-            self.repeats[anim.anim_id] = repeat
+            self.play_events[anim.anim_id] = play_event
+            self.pause_events[anim.anim_id] = pause_event
+            self.end_events[anim.anim_id] = end_event
 
     def play(self, anim_id):
         with self.lock:
+            print('[ANIM_PLAY]: holding lock, playing animation', anim_id)
             self.run_states[anim_id] = self.STATE_PLAYING
 
             if anim_id in self.paused_renders:
@@ -262,11 +264,14 @@ class AnimationManager(Thread):
 
     def pause(self, anim_id):
         with self.lock:
+            print('[ANIM_PLAY]: holding lock, pausing animation', anim_id)
+
             self.run_states[anim_id] = self.STATE_PAUSED
             self.paused_renders[anim_id] = self.animations[anim_id].get_next_tick()
 
     def stop(self, anim_id):
         with self.lock:
+            print('[ANIM_PLAY]: holding lock, stopping animation', anim_id)
             self.animations[anim_id].signal_done()
 
             del self.configs[anim_id]
@@ -275,8 +280,9 @@ class AnimationManager(Thread):
             del self.run_states[anim_id]
             del self.vis_states[anim_id]
 
-            del self.triggers[anim_id]
-            del self.repeats[anim_id]
+            del self.play_events[anim_id]
+            del self.pause_events[anim_id]
+            del self.end_events[anim_id]
 
             if anim_id in self.paused_renders:
                 del self.paused_renders[anim_id]
@@ -284,60 +290,68 @@ class AnimationManager(Thread):
     def set_visible(self, anim_id, visible):
         with self.lock:
             if visible:
+                print('[ANIM_PLAY]: holding lock, making animation', anim_id, 'visible')
                 self.vis_states[anim_id] = self.STATE_VISIBLE
             else:
+                print('[ANIM_PLAY]: holding lock, making animation', anim_id, 'invisible')
                 self.vis_states[anim_id] = self.STATE_INVISIBLE
+
+    def check_events(self):
+        for key in list(self.animations):
+            # animations that are waiting but need to be played
+            if self.run_states[key] == self.STATE_WAITING and self.play_events[key].is_met():
+                print('[ANIM_CHECK_EVENTS]: play event for animation', key, 'is met, (re)starting animation')
+
+                if self.animations[key].get_state() == AnimationThread.STATE_DONE:
+                    del self.animations[key]
+
+                    new_mov = self._parse_movement(self.configs[key])
+                    new_col = self._parse_color(self.configs[key])
+                    new_anim = self._parse_animation(self.configs[key])
+
+                    new_anim.set_movement(new_mov)
+                    new_anim.set_color(new_col)
+
+                    with self.lock:
+                        self.animations[new_anim.anim_id] = AnimationThread(new_anim)
+                        self.animations[new_anim.anim_id].start()
+
+                self.play(key)
+
+            # animations that are playing but need to be paused
+            elif self.run_states[key] == self.STATE_PLAYING and self.pause_events[key].is_met():
+                print('[ANIM_CHECK_EVENTS]: pause event for animation', key, 'is met, pausing animation')
+                self.pause(key)
+
+            # animations that need to be ended and removed
+            elif self.run_states[key] == self.STATE_WAITING and self.end_events[key].is_met():
+                print('[ANIM_CHECK_EVENTS]: stop event for animation', key, 'is met, stopping animation')
+                self.stop(key)
 
     def run(self):
         while True:
             start = time.time()
 
             if self.enabled:
-                with self.lock:
+                event_start_time = time.time()
+                self.check_events()
+                event_end_time = time.time()
 
+                with self.lock:
                     num_ready = 0
 
-                    # first update states
                     for key in list(self.animations):
                         # count playing or invisible animations
                         if self.run_states[key] == self.STATE_PLAYING:
                             num_ready += 1
 
-                        # wake up any waiting animations
-                        if self.run_states[key] == self.STATE_WAITING:
-                            if self.triggers[key] is not None and self.triggers[key].is_met():
-                                self.run_states[key] = self.STATE_PLAYING
-                                num_ready += 1
-
-                        # if animation is done, evaluate the repeat
                         if self.animations[key].get_state() == AnimationThread.STATE_DONE:
-                            if (self.repeats[key] is not None) and (not self.repeats[key].is_done()):
-                                self.triggers[key] = self.repeats[key].cycle()
-
-                                new_mov = self._parse_movement(self.configs[key])
-                                new_col = self._parse_color(self.configs[key])
-                                new_anim = self._parse_animation(self.configs[key])
-
-                                new_anim.set_movement(new_mov)
-                                new_anim.set_color(new_col)
-
-                                with self.lock:
-                                    self.animations[new_anim.anim_id] = AnimationThread(new_anim)
-                                    self.animations[new_anim.anim_id].start()
-
-                                    self.run_states[new_anim.anim_id] = self.STATE_WAITING
-                            else:
-                                del self.configs[key]
-                                del self.animations[key]
-
-                                del self.run_states[key]
-                                del self.vis_states[key]
-
-                                del self.triggers[key]
-                                del self.repeats[key]
+                            self.run_states[key] = self.STATE_WAITING
+                            num_ready -= 1
 
                     # after states are updated, render all necessary animations
                     if num_ready > 0:
+                        pull_start_time = time.time()
                         result_unmerged = [[] for _ in range(self.strip.numPixels())]
 
                         for key in list(self.animations):
@@ -360,6 +374,8 @@ class AnimationManager(Thread):
                                     if val != 0:
                                         result_unmerged[anim_thread.animation.block.start + index].append(val)
 
+                        pull_end_time = time.time()
+
                         # and merge the result
                         for index, values in enumerate(result_unmerged):
                             if len(values) == 0:
@@ -370,11 +386,25 @@ class AnimationManager(Thread):
                                 res = color_tools.merge_colors(values)
 
                             self.strip.setPixelColor(index, res)
+
+                        merge_end_time = time.time()
                         self.strip.show()
+                        show_end_time = time.time()
 
             end = time.time()
             if (1 / self.render_rate) > (end - start):
                 time.sleep((1 / self.render_rate) - (end - start))
+            else:
+                print('[ANIM_RENDER]: went over frame time, took', round(end - start, 5),
+                      'allowed', round(1 / self.render_rate, 5), 'diff', round((end - start) - (1 / self.render_rate), 5))
+                print('[ANIM_RENDER]: \tevent checking took', round(event_end_time - event_start_time, 5),
+                      '(', round((event_end_time - event_start_time) / (end - start) * 100, 2), '% )')
+                print('[ANIM_RENDER]: \tanimation pull took', round(pull_end_time - pull_start_time, 5),
+                      '(', round((pull_end_time - pull_start_time) / (end - start) * 100, 2), '% )')
+                print('[ANIM_RENDER]: \tanimation merge took', round(merge_end_time - pull_start_time, 5),
+                      '(', round((merge_end_time - pull_end_time) / (end - start) * 100, 2), '% )')
+                print('[ANIM_RENDER]: \tshowing animation took', round(show_end_time - merge_end_time, 5),
+                      '(', round((show_end_time - merge_end_time) / (end - start) * 100, 2), '% )')
 
 
 class AreaManager(Thread):
@@ -432,7 +462,6 @@ class AreaManager(Thread):
             self.upper[area_id] = upper
 
             if area_id not in self.state:
-                print('creating state for', area_id)
                 self.visible[area_id] = True
                 self.state[area_id] = [0 for _ in range(self.strip.numPixels())]
 
@@ -567,8 +596,8 @@ class Player:
             self.animation_thread.enabled = False
             self.area_manager.enabled = False
 
-    def add_anim(self, animation_config, trigger_config, repeat_config):
-        self.animation_thread.add(animation_config, trigger_config, repeat_config)
+    def add_anim(self, animation_config, play_config, pause_config, end_config):
+        self.animation_thread.add(animation_config, play_config, pause_config, end_config)
 
     def play_anim(self, anim_id):
         self.animation_thread.play(anim_id)

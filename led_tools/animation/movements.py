@@ -20,6 +20,8 @@ class MovementAnimation(ABC):
 class Fade(MovementAnimation):
     def __init__(self, fade_type, fade_direction):
         super().__init__()
+        print('[MOVE -', id(self), ']: instantiating fade movement object with fade type', fade_type,
+              'and direction', fade_direction)
 
         self.fade_type = fade_type
         self.fade_direction = fade_direction
@@ -27,6 +29,8 @@ class Fade(MovementAnimation):
     def set_bounds(self, block_start, block_stop, total_ticks):
         self.len = block_stop - block_start
         self.weights.clear()
+
+        print('[MOVE -', id(self), ']: setting bounds', block_start, block_stop, total_ticks)
 
         for tick in range(0, total_ticks + 1):
             # first generate the weight
@@ -50,6 +54,8 @@ class Fade(MovementAnimation):
             elif self.fade_direction == '-':
                 self.weights.append(1 - weight)
 
+        print('[MOVE -', id(self), ']: calculated weights', self.weights)
+
     def get(self, tick):
         return [self.weights[tick]] * self.len
 
@@ -71,6 +77,9 @@ class Move(MovementAnimation):
     def __init__(self, length, fade_type, move_direction, acc_type):
         super().__init__()
 
+        print('[MOVE -', id(self), ']: instantiating move movement object with fade type', fade_type,
+              'and direction', move_direction)
+
         self.length = length
         self.fade_type = fade_type
         self.move_direction = move_direction
@@ -83,8 +92,12 @@ class Move(MovementAnimation):
         self.len = block_stop - block_start
         self.weights.clear()
 
+        print('[MOVE -', id(self), ']: setting bounds', block_start, block_stop, total_ticks)
+
         self.fade_ticks = round((total_ticks * self.length) / (2 * (block_stop - block_start + self.length)))
         self.velocity = (total_ticks - 2 * self.fade_ticks) / (block_stop - block_start)
+
+        print('[MOVE -', id(self), ']: calculated fade_ticks =', self.fade_ticks, 'and velocity =', self.velocity)
 
         for tick in range(0, self.fade_ticks):
             weight = 0
@@ -102,6 +115,8 @@ class Move(MovementAnimation):
                 weight = 1 / (1 + math.exp((-14 / self.fade_ticks) * (tick - (self.fade_ticks / 2))))
 
             self.weights.append(weight)
+
+        print('[MOVE -', id(self), ']: calculated weights', self.weights)
 
     def get(self, tick):
         tick_weights = []
