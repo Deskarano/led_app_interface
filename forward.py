@@ -33,7 +33,9 @@ class ForwardThread(Thread):
             print(self.from_name, '->', self.to_name, '(', self.count, '): forwarding', socket_decode(msg))
             self.to_socket.send(msg)
 
-        self.to_socket.send(socket_encode(protocol.P_CLOSE_CONNECTION))
+        if self.to_name == 'pi':
+            self.to_socket.send(socket_encode(protocol.P_CLOSE_CONNECTION))
+
         print(self.from_name, '->', self.to_name, '(', self.count, '): stopping')
 
 

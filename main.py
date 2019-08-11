@@ -8,16 +8,6 @@ from file import file_utils, config_utils
 from led_tools import player
 
 
-def socket_encode(value):
-    result = (str(value) + '\n').encode('UTF-8')
-    return result
-
-
-def socket_decode(value):
-    result = value.decode('UTF-8').strip()
-    return result
-
-
 class ClientThread(Thread):
     def __init__(self, client, player, thread_id):
         Thread.__init__(self)
@@ -26,15 +16,27 @@ class ClientThread(Thread):
         self.player = player
 
         self.thread_id = thread_id
+        self.subscribed_ids = []
+
+    def stop_connect(self):
+        for anim_id in self.subscribed_ids:
+            print('[NETWORK', self.thread_id, ']: unsubscribing from animation', anim_id)
+            self.player.unsub_from_anim(anim_id)
 
     def run(self):
         while True:
-            command = self.client.recv(1024)
+            try:
+                command = self.client.recv(1024)
 
-            if command == b'':
+            except ConnectionResetError:
+                self.stop_connect()
                 break
 
-            command = socket_decode(command)
+            if command == b'':
+                self.stop_connect()
+                break
+
+            command = protocol.socket_decode(command)
 
             print('[NETWORK', self.thread_id, ']: received command: ' + command)
             split_command = command.split('\\')
@@ -42,10 +44,11 @@ class ClientThread(Thread):
             # connection commands
             if split_command[0] == protocol.P_TEST_CONNECTION:
                 print('[NETWORK', self.thread_id, ']: responding success')
-                self.client.send(socket_encode(protocol.P_SUCCESS))
+                self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
 
             elif split_command[0] == protocol.P_CLOSE_CONNECTION:
                 print('[NETWORK', self.thread_id, ']: closing connection')
+                self.stop_connect()
                 self.client.close()
                 break
 
@@ -53,43 +56,43 @@ class ClientThread(Thread):
             elif split_command[0] == protocol.P_REQUEST_QUEUE:
                 print('[NETWORK', self.thread_id, ']: responding with queue entries')
 
-                queue_entries = file_utils.get_queue()
-                self.client.send(socket_encode(len(queue_entries)))
+                queue_entries = self.player.get_anim_queue()
+                self.client.send(protocol.socket_encode(len(queue_entries)))
 
                 for entry in queue_entries:
-                    self.client.send(socket_encode(queue_entries[entry]))
+                    self.client.send(protocol.socket_encode(entry))
 
             elif split_command[0] == protocol.P_REQUEST_AREAS:
                 print('[NETWORK', self.thread_id, ']: responding with area entries')
 
                 areas = file_utils.get_areas()
-                self.client.send(socket_encode(len(areas)))
+                self.client.send(protocol.socket_encode(len(areas)))
 
                 for area in areas:
-                    self.client.send(socket_encode(areas[area]))
+                    self.client.send(protocol.socket_encode(areas[area]))
 
             elif split_command[0] == protocol.P_REQUEST_STRIP_SIZE:
                 print('[NETWORK', self.thread_id, ']: responding with strip size')
-                self.client.send(socket_encode(self.player.strip.numPixels()))
+                self.client.send(protocol.socket_encode(self.player.strip.numPixels()))
 
             # mode commands
             elif split_command[0] == protocol.P_MODE_ANIMATIONS:
-                print('[NETWORK', self.thread_id, ']: setting player mode to animations')
+                print('[NETWORK', self.thread_id, ']:invisible setting player mode to animations')
 
                 self.player.set_mode(led_player.MODE_ANIMATION)
-                self.client.send(socket_encode(protocol.P_SUCCESS))
+                self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
 
             elif split_command[0] == protocol.P_MODE_AREAS:
                 print('[NETWORK', self.thread_id, ']: setting player mode to areas')
 
                 self.player.set_mode(led_player.MODE_AREA)
-                self.client.send(socket_encode(protocol.P_SUCCESS))
+                self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
 
             elif split_command[0] == protocol.P_MODE_IDLE:
                 print('[NETWORK', self.thread_id, ']: setting player mode to idle')
 
                 self.player.set_mode(led_player.MODE_IDLE)
-                self.client.send(socket_encode(protocol.P_SUCCESS))
+                self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
 
             # area commands
             elif split_command[0] == protocol.P_CREATE_AREA:
@@ -99,7 +102,7 @@ class ClientThread(Thread):
                                            split_command[1],
                                            split_command[2])
 
-                client_socket.send(socket_encode(protocol.P_SUCCESS))
+                client_socket.send(protocol.socket_encode(protocol.P_SUCCESS))
 
             elif split_command[0] == protocol.P_EDIT_AREA:
                 print('[NETWORK', self.thread_id, ']: editing area')
@@ -132,12 +135,12 @@ class ClientThread(Thread):
                     result = ''
 
                 if result == '':
-                    self.client.send(socket_encode(protocol.P_FAILURE))
+                    self.client.send(protocol.socket_encode(protocol.P_FAILURE))
                     print('[NETWORK', self.thread_id, ']: failed to edit area')
 
                 else:
                     file_utils.set_file_config(file_utils.AREA_PATH, split_command[2], result)
-                    self.client.send(socket_encode(protocol.P_SUCCESS))
+                    self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
                     print('[NETWORK', self.thread_id, ']: successfully edited area')
 
             elif split_command[0] == protocol.P_DELETE_AREA:
@@ -147,10 +150,10 @@ class ClientThread(Thread):
                 self.player.delete_area(split_command[1])
 
                 if result:
-                    self.client.send(socket_encode(protocol.P_SUCCESS))
+                    self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
                     print('[NETWORK', self.thread_id, ']: successfully deleted area')
                 else:
-                    self.client.send(socket_encode(protocol.P_FAILURE))
+                    self.client.send(protocol.socket_encode(protocol.P_FAILURE))
                     print('[NETWORK', self.thread_id, ']: failed to delete area')
 
             # display commands
@@ -161,34 +164,74 @@ class ClientThread(Thread):
                                          int(split_command[3]),
                                          int(split_command[4], 16))
 
-                self.client.send(socket_encode(protocol.P_SUCCESS))
+                self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
 
             elif split_command[0] == protocol.P_SET_AREA_VISIBLE:
                 if split_command[2] == 'true':
                     print('[NETWORK', self.thread_id, ']: making area visible')
 
                     self.player.set_area_visible(split_command[1], True)
-                    self.client.send(socket_encode(protocol.P_SUCCESS))
+                    self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
 
                 elif split_command[2] == 'false':
                     print('[NETWORK', self.thread_id, ']: making area invisible')
 
                     self.player.set_area_visible(split_command[1], False)
-                    self.client.send(socket_encode(protocol.P_SUCCESS))
+                    self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
 
                 else:
                     print('[NETWORK', self.thread_id, ']: failed to change area visibility')
-                    self.client.send(socket_encode(protocol.P_FAILURE))
+                    self.client.send(protocol.socket_encode(protocol.P_FAILURE))
 
+            # animation commands
             elif split_command[0] == protocol.P_ADD_ANIMATION:
                 print('[NETWORK', self.thread_id, ']: adding animation')
 
                 self.player.add_anim(split_command[1], split_command[2], split_command[3], split_command[4])
-                self.client.send(socket_encode(protocol.P_SUCCESS))
+                self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
+
+            elif split_command[0] == protocol.P_PLAY_ANIMATION:
+                print('[NETWORK', self.thread_id, ']: playing animation', split_command[1])
+                self.player.play_anim(split_command[1])
+                self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
+
+            elif split_command[0] == protocol.P_PAUSE_ANIMATION:
+                print('[NETWORK', self.thread_id, ']: pausing animation', split_command[1])
+                self.player.pause_anim(split_command[1])
+                self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
+
+            elif split_command[0] == protocol.P_STOP_ANIMATION:
+                print('[NETWORK', self.thread_id, ']: stopping animation', split_command[1])
+                self.player.stop_anim(split_command[1])
+                self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
+
+            elif split_command[0] == protocol.P_TOGGLE_ANIMATION:
+                if split_command[2] == 'true':
+                    print('[NETWORK', self.thread_id, ']: making animation visible')
+
+                    self.player.set_anim_visible(split_command[1], True)
+                    self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
+
+                elif split_command[2] == 'false':
+                    print('[NETWORK', self.thread_id, ']: making animation invisible')
+
+                    self.player.set_anim_visible(split_command[1], False)
+                    self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
+
+                else:
+                    print('[NETWORK', self.thread_id, ']: failed to change animation visibility')
+                    self.client.send(protocol.socket_encode(protocol.P_FAILURE))
+
+            elif split_command[0] == protocol.P_SUBSCRIBE_TO_ANIM:
+                print('[NETWORK', self.thread_id, ']: subscribing to events from animation', split_command[1])
+
+                self.subscribed_ids.append(split_command[1])
+                self.player.sub_to_anim(split_command[1], self.client)
+                self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
 
             else:
                 print('[NETWORK', self.thread_id, ']: unrecognized command')
-                self.client.send(socket_encode(protocol.P_FAILURE))
+                self.client.send(protocol.socket_encode(protocol.P_FAILURE))
 
         print('[NETWORK', self.thread_id, ']: thread exiting')
 

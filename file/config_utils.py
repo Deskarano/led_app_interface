@@ -1,24 +1,24 @@
-# config settings for queue entries
-QUEUE_ANIM = 'anim'
-QUEUE_ANIM_NAME_VAL = 1
-QUEU_ANIM_ID_VAL = 2
+# config settings for animations
+ANIM_ENTRY = 'anim'
+ANIM_NAME = 1
+ANIM_ID = 2
 
-QUEUE_AREA = 'area'
-QUEUE_AREA_ID = 1
+ANIM_AREA = 'block'
+ANIM_AREA_ID = 1
 
-QUEUE_TICKS = 'ticks'
-QUEUE_TICKS_VAL = 1
+ANIM_TICKS = 'ticks'
+ANIM_TICKS_VAL = 1
 
-QUEUE_COLOR = 'color'
-QUEUE_COLOR_TYPE = 1
-QUEUE_COLOR_ARG1 = 2
-QUEUE_COLOR_ARG2 = 3
+ANIM_COLOR = 'color'
+ANIM_COLOR_TYPE = 1
+ANIM_COLOR_ARG1 = 2
+ANIM_COLOR_ARG2 = 3
 
-QUEUE_MOVE = 'movement'
-QUEUE_MOVE_TYPE = 1
-QUEUE_MOVE_FADE_TYPE = 2
-QUEUE_MOVE_DIR = 3
-QUEUE_MOVE_ARG1 = 4
+ANIM_MOVE = 'movement'
+ANIM_MOVE_TYPE = 1
+ANIM_MOVE_FADE_TYPE = 2
+ANIM_MOVE_DIR = 3
+ANIM_MOVE_ARG1 = 4
 
 # config settings for areas
 AREA_ENTRY = 'area'
@@ -34,12 +34,35 @@ AREA_COLOR_VAL = 1
 
 # config settings for events
 EVENT_ENTRY = 'event'
+EVENT_NAME = 1
+EVENT_ID = 2
 
 EVENT_CONF = 'conf'
 EVENT_TYPE = 1
 EVENT_ARG1 = 2
 EVENT_ARG2 = 3
 EVENT_ARG3 = 4
+
+# config settings for queue
+QUEUE_ENTRY = 'queue'
+QUEUE_NAME = 1
+QUEUE_ID = 2
+
+QUEUE_AREA = 'area'
+QUEUE_AREA_ID = 1
+
+QUEUE_TICKS = 'ticks'
+QUEUE_TICKS_VAL = 1
+QUEUE_TICKS_TOTAL = 2
+
+QUEUE_COLOR = 'color'
+QUEUE_COLOR_TYPE = 1
+QUEUE_COLOR_ARG1 = 2
+QUEUE_COLOR_ARG2 = 3
+
+QUEUE_STATE = 'state'
+QUEUE_STATE_RUN = 1
+QUEUE_STATE_VIS = 2
 
 
 def split(config):
