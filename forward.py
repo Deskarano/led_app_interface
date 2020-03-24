@@ -31,7 +31,10 @@ class ForwardThread(Thread):
                 break
 
             print(self.from_name, '->', self.to_name, '(', self.count, '): forwarding', socket_decode(msg))
-            self.to_socket.send(msg)
+            try:
+                self.to_socket.send(msg)
+            except BrokenPipeError:
+                pass
 
         if self.to_name == 'pi':
             self.to_socket.send(socket_encode(protocol.P_CLOSE_CONNECTION))

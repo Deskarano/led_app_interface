@@ -1,3 +1,4 @@
+import neopixel
 import time
 import queue
 
@@ -5,8 +6,8 @@ from collections import defaultdict
 from threading import Thread, Condition
 from datetime import date as dt_date, time as dt_time, datetime, timedelta
 
+from net import protocol
 from led_tools.animation import animation, colors, movements, events
-from net.protocol import send_tick, send_state
 from file import config_utils, file_utils
 
 from . import color_tools
@@ -69,7 +70,7 @@ class AnimationManager(Thread):
         self.pause_events = {}
         self.end_events = {}
 
-        self.subscription_sockets = {}
+        self.subscription_queues = {}
 
         self.paused_renders = {}
 
@@ -257,13 +258,14 @@ class AnimationManager(Thread):
             self.pause_events[anim.anim_id] = pause_event
             self.end_events[anim.anim_id] = end_event
 
-    def subscribe(self, anim_id, client_socket):
+    def subscribe(self, anim_id):
         with self.lock:
-            self.subscription_sockets[anim_id] = client_socket
+            self.subscription_queues[anim_id] = queue.Queue(maxsize=5)
+            return self.subscription_queues[anim_id]
 
     def unsubscribe(self, anim_id):
         with self.lock:
-            del self.subscription_sockets[anim_id]
+            del self.subscription_queues[anim_id]
 
     def play(self, anim_id):
         with self.lock:
@@ -280,8 +282,8 @@ class AnimationManager(Thread):
                 if anim_id in self.paused_renders:
                     del self.paused_renders[anim_id]
 
-            if anim_id in self.subscription_sockets:
-                send_state(self.subscription_sockets[anim_id], anim_id, self.STATE_PLAYING)
+            if anim_id in self.subscription_queues:
+                self.subscription_queues[anim_id].put(self.STATE_PLAYING)
 
     def pause(self, anim_id):
         with self.lock:
@@ -290,8 +292,8 @@ class AnimationManager(Thread):
             self.run_states[anim_id] = self.STATE_PAUSED
             self.paused_renders[anim_id] = self.animations[anim_id].get_next_tick()
 
-            if anim_id in self.subscription_sockets:
-                send_state(self.subscription_sockets[anim_id], anim_id, self.STATE_PAUSED)
+            if anim_id in self.subscription_queues:
+                self.subscription_queues[anim_id].put(self.STATE_PAUSED)
 
     def stop(self, anim_id):
         with self.lock:
@@ -311,8 +313,8 @@ class AnimationManager(Thread):
             if anim_id in self.paused_renders:
                 del self.paused_renders[anim_id]
 
-            if anim_id in self.subscription_sockets:
-                send_state(self.subscription_sockets[anim_id], anim_id, 'stopped')
+            if anim_id in self.subscription_queues:
+                self.subscription_queues[anim_id].put('stopped')
 
             if len(list(self.animations)) == 0:
                 for i in range(0, self.strip.numPixels()):
@@ -360,21 +362,22 @@ class AnimationManager(Thread):
         return config_utils.create_config([queue_param, area_param, tick_param, color_param, state_param])
 
     def check_events(self):
-        for key in list(self.animations):
-            # animations that are waiting but need to be played
-            if self.run_states[key] == self.STATE_WAITING and self.play_events[key].is_met():
-                print('[ANIM_CHECK_EVENTS]: play event for animation', key, 'is met, (re)starting animation')
-                self.play(key)
+        with self.lock:
+            for key in list(self.animations):
+                # animations that are waiting but need to be played
+                if self.run_states[key] == self.STATE_WAITING and self.play_events[key].is_met():
+                    print('[ANIM_CHECK_EVENTS]: play event for animation', key, 'is met, (re)starting animation')
+                    self.play(key)
 
-            # animations that are playing but need to be paused
-            elif self.run_states[key] == self.STATE_PLAYING and self.pause_events[key].is_met():
-                print('[ANIM_CHECK_EVENTS]: pause event for animation', key, 'is met, pausing animation')
-                self.pause(key)
+                # animations that are playing but need to be paused
+                elif self.run_states[key] == self.STATE_PLAYING and self.pause_events[key].is_met():
+                    print('[ANIM_CHECK_EVENTS]: pause event for animation', key, 'is met, pausing animation')
+                    self.pause(key)
 
-            # animations that need to be ended and removed
-            elif self.end_events[key].is_met():
-                print('[ANIM_CHECK_EVENTS]: stop event for animation', key, 'is met, stopping animation')
-                self.stop(key)
+                # animations that need to be ended and removed
+                elif self.end_events[key].is_met():
+                    print('[ANIM_CHECK_EVENTS]: stop event for animation', key, 'is met, stopping animation')
+                    self.stop(key)
 
     def run(self):
         on_time = 0
@@ -397,8 +400,8 @@ class AnimationManager(Thread):
                             if self.animations[key].get_state() == AnimationThread.STATE_DONE:
                                 self.run_states[key] = self.STATE_WAITING
 
-                                if key in self.subscription_sockets:
-                                    send_state(self.subscription_sockets[key], key, self.STATE_WAITING)
+                                if key in self.subscription_queues:
+                                    self.subscription_queues[key].put(self.STATE_WAITING)
 
                             else:
                                 num_ready += 1
@@ -414,8 +417,9 @@ class AnimationManager(Thread):
                                 anim_thread = self.animations[key]
                                 anim_render = anim_thread.get_next_tick()
 
-                                if key in self.subscription_sockets:
-                                    send_tick(self.subscription_sockets[key], key, anim_thread.tick)
+                                if key in self.subscription_queues:
+                                    self.subscription_queues[key].put('tick')
+                                    self.subscription_queues[key].put(anim_thread.tick)
 
                                 if self.vis_states[key] == self.STATE_VISIBLE:
                                     for index, val in enumerate(anim_render):
@@ -686,7 +690,7 @@ class Player:
         self.animation_thread.set_visible(anim_id, visible)
 
     def sub_to_anim(self, anim_id, client_socket):
-        self.animation_thread.subscribe(anim_id, client_socket)
+        return self.animation_thread.subscribe(anim_id)
 
     def unsub_from_anim(self, anim_id):
         self.animation_thread.unsubscribe(anim_id)
@@ -699,3 +703,67 @@ class Player:
 
     def set_area_visible(self, area_id, visible):
         self.area_manager.set_area_visible(area_id, visible)
+
+
+def player_process(in_queue, out_queue):
+    num_leds = in_queue.get()
+    gpio_pin = in_queue.get()
+
+    strip = neopixel.Adafruit_NeoPixel(int(num_leds), int(gpio_pin), strip_type=neopixel.ws.WS2811_STRIP_GRB)
+    strip.begin()
+
+    led_player = Player(strip, 60)
+    while True:
+        cmd = in_queue.get()
+
+        if cmd == 'end':
+            return
+
+        # management requests
+        elif cmd == protocol.P_REQUEST_QUEUE:
+            anim_queue = led_player.get_anim_queue()
+
+            out_queue.put(len(anim_queue))
+            for q in anim_queue:
+                out_queue.put(q)
+
+        elif cmd == protocol.P_MODE_ANIMATIONS:
+            led_player.set_mode(Player.MODE_ANIMATION)
+
+        elif cmd == protocol.P_MODE_AREAS:
+            led_player.set_mode(Player.MODE_AREA)
+
+        elif cmd == protocol.P_MODE_IDLE:
+            led_player.set_mode(Player.MODE_IDLE)
+
+        # area requests
+        elif cmd == protocol.P_DELETE_AREA:
+            area_id = in_queue.get()
+            led_player.delete_area(area_id)
+
+        elif cmd == protocol.P_DISPLAY_AREA:
+            area_id = in_queue.get()
+            area_lower = int(in_queue.get())
+            area_upper = int(in_queue.get())
+            area_color = int(in_queue.get(), 16)
+
+            led_player.display_area(area_id, area_lower, area_upper, area_color)
+
+        elif cmd == protocol.P_SET_AREA_VISIBLE:
+            area_id = in_queue.get()
+            area_vis = bool(in_queue.get())
+
+            led_player.set_area_visible(area_id, area_vis)
+
+        # animation requests:
+        elif cmd == protocol.P_ADD_ANIMATION:
+            anim_config = in_queue.get()
+            play_config = in_queue.get()
+            pause_config = in_queue.get()
+            stop_config = in_queue.get()
+
+            led_player.add_anim(anim_config, play_config, pause_config, stop_config)
+
+        elif cmd == protocol.P_PLAY_ANIMATION:
+            anim_id = in_queue.get()
+            pass

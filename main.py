@@ -1,9 +1,10 @@
 import socket
 import neopixel
+import queue
 
-from threading import Thread
 from net import protocol
 from file import file_utils, config_utils
+from threading import Thread
 
 from led_tools import player
 
@@ -224,10 +225,40 @@ class ClientThread(Thread):
 
             elif split_command[0] == protocol.P_SUBSCRIBE_TO_ANIM:
                 print('[NETWORK', self.thread_id, ']: subscribing to events from animation', split_command[1])
-
+                self.client.settimeout(.008)
                 self.subscribed_ids.append(split_command[1])
-                self.player.sub_to_anim(split_command[1], self.client)
+                msg_queue = self.player.sub_to_anim(split_command[1], self.client)
                 self.client.send(protocol.socket_encode(protocol.P_SUCCESS))
+
+                while True:
+                    try:
+                        msg = self.client.recv(1024)
+                        if msg == b'':
+                            self.stop_connect()
+                            break
+                        else:
+                            # any message we receive at this point should fail
+                            self.client.send(protocol.socket_encode(protocol.P_FAILURE))
+
+                    except socket.timeout:
+                        try:
+                            msg = msg_queue.get(True, .008)
+
+                            if msg == 'tick':
+                                opt = msg_queue.get(True, .008)
+                                self.client.send(protocol.socket_encode(split_command[1] + '\\' +
+                                                                        protocol.P_SUB_EVENT_TICK + '\\' +
+                                                                        str(opt)))
+                            else:
+                                self.client.send(protocol.socket_encode(split_command[1] + '\\' +
+                                                                        protocol.P_SUB_EVENT_STATE + '\\' +
+                                                                        msg))
+
+                        except queue.Empty:
+                            # nothing to do, just no messages available
+                            pass
+
+                break
 
             else:
                 print('[NETWORK', self.thread_id, ']: unrecognized command')
@@ -259,7 +290,6 @@ while True:
     (client_socket, address) = server_socket.accept()
     print('[NETWORK]: got client with address', str(address))
     print('[NETWORK]: assigning thread', client_thread_id, 'to client', str(address))
-
 
     ClientThread(client_socket, led_player, client_thread_id).start()
     client_thread_id += 1
